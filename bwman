@@ -1,0 +1,588 @@
+#!/bin/bash
+
+# IDEAS
+# - when adding/deleting, unlock the pwfile last
+# - sort tmpfile
+# - s/getopts/while-case/?
+
+########################
+####### VARIABLES ######
+########################
+
+create_pwfile_backups="yes"
+gpg_user="$USER"
+password_length="16"
+pwfile="${XDG_DATA_HOME:-"${HOME}/local/share"}/bwman/bwman.asc"
+
+p_name="$(basename $0)"
+p_version="1.0a"
+
+c_error="$(tput setaf 1)"
+c_normal="$(tput setaf 2)"
+c_reset="$(tput sgr0)"
+c_warning="$(tput setaf 3)"
+
+global_config="/etc/bwman.conf"
+user_config="${XDG_CONFIG_HOME:-"${HOME}/config"}/bwman/bwman.conf"
+[[ -f "$global_config" ]] && source "$global_config"
+[[ -f "$user_config" ]] && source "$user_config"
+
+########################
+###### FUNCTIONS #######
+########################
+
+msg_error() {
+    # desc: print error messages
+    # args: >1
+    echo "${c_error}[error]${c_reset} "$@"" >&2
+}
+
+msg_info() {
+    # desc: print info messages
+    # args: >1
+    echo "${c_normal}[info]${c_reset} "$@""
+}
+
+msg_warning() {
+    # desc: print warning messages
+    # args: >1
+    echo "${c_warning}[warning]${c_reset} "$@"" >&2
+}
+
+die() {
+    # desc: kill the script
+    # args: 1
+    [[ -f "$tmpfile" ]] && { rm -f "$tmpfile" || \
+        msg_error "Couldn't remove the temp-file"; }
+    stty echo
+    exit "$1"
+}
+
+trap "msg_error 'Error occurred'; die 1" TERM
+trap "msg_error 'Interrupt caught'; die 2" INT
+
+ask_boolean() {
+    # desc: ask a yes/no question, store the answer in $ask_boolean_reply
+    # args: 0
+    while :
+    do
+        read -e
+        if [[ -n "$REPLY" ]]
+        then
+            case "$REPLY" in
+                [yY]|[yY][eE][sS])
+                    ask_boolean_reply="y"
+                    break
+                    ;;
+                [nN]|[nN][oO])
+                    ask_boolean_reply="n"
+                    break
+                    ;;
+                *)
+                    msg_warning "Not a valid choice"
+                    ;;
+            esac
+        else
+            msg_warning "Input can't be empty"
+        fi
+    done
+}
+
+ask_select() {
+    # desc: ask to choose between options, store the reply in $ask_select_reply
+    # args: >1
+    while :
+    do
+        read -e
+        if [[ -n "$REPLY" ]]
+        then
+            for choice in "$@"
+            do
+                if [[ "$REPLY" == "$choice" || "$REPLY" =~ ${choice:0:1} ]]
+                then
+                    ask_select_reply="$REPLY"
+                    break 2
+                fi
+            done
+
+            msg_warning "Not a valid choice"
+        else
+            msg_warning "Input can't be empty"
+        fi
+    done
+}
+
+ask_pass() {
+    # desc: ask for a password
+    # args: 0
+    while :
+    do
+        read -e -s
+        if [[ -n "$REPLY" ]]
+        then
+            if [[ "$REPLY" =~ ^[[:graph:]]+$ ]]
+            then
+                ask_pass_reply="$REPLY"
+                break
+            else
+                msg_warning "Allowed characters: all alphanumerics and symbols"
+            fi
+        else
+            msg_warning "Input can't be empty"
+        fi
+    done
+}
+
+ask_string() {
+    # desc: ask for a string, store the answer in $ask_string_reply
+    # args: 0
+    while :
+    do
+        read -e
+        if [[ -n "$REPLY" ]]
+        then
+            if [[ "$REPLY" =~ ^[[:graph:]]+$ ]]
+            then
+                ask_string_reply="$REPLY"
+                break
+            else
+                msg_warning "Allowed characters: all alphanumerics and symbols"
+            fi
+        else
+            msg_warning "Input can't be empty"
+        fi
+    done
+}
+
+create_password() {
+    # desc: create a random password, ask if it gets copied to clipboard
+    # args: 0
+    msg_info "Create a [c]ustom or [r]andom password?"
+    ask_select "random" "custom"
+    case "$ask_select_reply" in
+        c|custom)
+            ask_pass
+            service_pass="$ask_pass_reply"
+            ;;
+        r|random)
+            service_pass="$(generate_password)"
+            msg_info "Copy password to the clipboard?"
+            ask_boolean
+            [[ "$ask_boolean_reply" == "y" ]] && \
+                if xsel -i <<< "$service_pass"
+                then
+                    msg_info "Password copied to the clipboard"
+                else
+                    msg_warning "Couldn't copy the password to the clipboard"
+                fi
+            ;;
+    esac
+}
+
+create_pwfile_bak() {
+    # desc: create a backup of the pwfile, if backup-creating is enabled
+    # args: 0
+    [[ "$create_pwfile_backups" == "yes" ]] && \
+        cp -f "$pwfile" "${pwfile}.bak" || {\
+        msg_error "Couldn't backup the password-file"; die 1; }
+}
+
+create_tmpfile() {
+    # desc: create a temp-file to be used to store the pwfile
+    # args: 0
+    tmpfile="$(mktemp -q -p /tmp ${p_name}.$$.XXXXXXXXXXXXXXXX)" || \
+        { msg_error "Couldn't create a temp-file"; die 1; }
+}
+
+decrypt_pwfile() {
+    # desc: decrypt the pwfile to the tmpfile
+    # args: 0
+    create_tmpfile
+    msg_info "Password for the password-file?"
+    while :
+    do
+        local service_pass
+        ask_pass
+        service_pass="$ask_pass_reply"
+        if gpg2 --decrypt --quiet --yes --no-tty --batch --passphrase "$service_pass" \
+            --logger-file /dev/null --output "$tmpfile" "$pwfile"
+        then
+            unset ask_pass_reply
+            break
+        else
+            msg_warning "Wrong password"
+        fi
+    done
+}
+
+edit_pwfile() {
+    # desc: edit the pwfile with $EDITOR
+    #       after editing check if pwfile is correctly written
+    # args: 0
+    while :
+    do
+        ${EDITOR} "$tmpfile" || \
+            { msg_error "Couldn't edit the password-file"; die 1; }
+        test_pwfile_integrity
+        case "$edit_needed" in
+            yes)
+                msg_warning "There were errors in the password-file."
+                msg_info "Would you like to re-edit the file?"
+                ask_boolean
+                case "$ask_boolean_reply" in
+                    y) continue;;
+                    n) break;;
+                esac
+                ;;
+            no)
+                break
+                ;;
+        esac
+    done
+}
+
+encrypt_pwfile() {
+    # desc: replace pwfile with tmpfile
+    # args: 0
+    gpg2 --encrypt --yes --armor --recipient "$gpg_user" \
+        --logger-file /dev/null --output "$pwfile" "$tmpfile" || \
+        { msg_error "Couldn't encrypt the password-file"; die 1; }
+}
+
+escape_replace() {
+    # desc: escape special characters in replace part of sed expression
+    #       http://stackoverflow.com/a/2705678
+    # args: >1
+    #sed -e 's/\([\/&]\)/\\\1/g'
+    sed -e 's/[\/&]/\\&/g'
+}
+
+escape_substitute() {
+    # desc: escape special characters in substitute part of sed expression
+    #       http://stackoverflow.com/a/2705678
+    # args: >1
+    sed -e 's/\([[\/.*]\|\]\)/\\&/g'
+}
+
+generate_password() {
+    # desc: generate a random password with length of password_length
+    # args: 0
+    tr -dc [:graph:] < /dev/urandom | head -c "$password_length"
+}
+
+modify_info() {
+    # desc: change field number $1 in row number $2 to $3 in $tmpfile
+    # args: 3
+    case "$1" in
+        --name) field="1";;
+        --pass) field="3";;
+        --user) field="2";;
+    esac
+
+    sed -i -e ""$2"s/[[:graph:]]\+/"$3"/"$field"" "$tmpfile"
+}
+
+print_pwfile_cleaned() {
+    # desc: print the tmpfile without empty or commented lines
+    # args: 0
+    grep -E -v '^[[:space:]]*#|^[[:space:]]*$' "$tmpfile"
+}
+
+print_service_info() {
+    # desc: print info about service $1
+    # args: 1
+    service_name="$1"
+    msg_info "Username: "$(print_service_user "$service_name")""
+    msg_info "Password: "$(print_service_pass "$service_name")""
+}
+
+print_service_line() {
+    # desc: print the line number of the service $1 in the tmpfile
+    # args: 1
+    sed -n "/^"$1"[[:space:]]\+/=" "$tmpfile"
+}
+
+print_service_list() {
+    # args: print a list of services
+    # args: 0
+    awk '{print $1 | "sort"}' < <(print_pwfile_cleaned)
+}
+
+print_service_pass() {
+    # desc: print the password of service $1
+    # args: 1
+    awk -v line="$(print_service_line "$1")" \
+        'NR==line {print $3}' "$tmpfile"
+}
+
+print_service_user() {
+    # desc: print the username of service $1
+    # args: 1
+    awk -v line="$(print_service_line "$1")" \
+        'NR==line {print $2}' "$tmpfile"
+}
+
+print_usage() {
+    # desc: print the usage instructions
+    # args: 0
+    echo "Usage: ${p_name} [OPTION] <NAME>"
+    echo
+    echo "Options:"
+    echo "    -a NAME   Add a new service"
+    echo "    -d NAME   Delete a service"
+    echo "    -e        Edit the password-file with \$EDITOR"
+    echo "    -l        List services"
+    echo "    -p NAME   Print services username and password"
+    echo "    -y NAME   Yank services password to the clipboard"
+    echo "    -h        Help"
+}
+
+print_version() {
+    # desc: print the program name and the version number
+    # args: 0
+    echo "${p_name} ${p_version}"
+}
+
+service_add() {
+    # desc: add service $1
+    # args: 1
+    service_name="$1"
+
+    msg_info "Username?"
+    ask_string
+    service_user="$ask_string_reply"
+
+    create_password
+
+    echo "${service_name} ${service_user} ${service_pass}" >> "$tmpfile" || \
+        { msg_error "Couldn't add the service"; die 1; }
+    unset service_pass
+    msg_info "Service "$service_name" added"
+}
+
+service_del() {
+    # desc: delete service $1
+    # args: 1
+    msg_info "Delete "$1"?"
+    ask_boolean
+    case "$ask_boolean_reply" in
+        y)
+            line_number="$(print_service_line "$1")"
+            sed -i -e "${line_number}d" "$tmpfile" || \
+                { msg_error "Couldn't delete service"; die 1; }
+            msg_info "Deleted "$1""
+            ;;
+        n)
+            msg_info "Not deleting "$1""
+            ;;
+    esac
+}
+
+service_modify() {
+    # desc: change the name, password or username of service $1
+    # args: 1
+    line_number="$(print_service_line "$1")"
+
+    msg_info "What would you like to change, [n]ame, [p]assword or [u]sername?"
+    ask_select "name" "password" "username"
+    case "$ask_select_reply" in
+        n|name)
+            old_name="$1"
+            msg_info "Enter the new name for the service:"
+            ask_string
+            new_name="$(escape_replace <<<"$ask_string_reply")"
+
+            modify_info --name "$line_number" "$new_name" || \
+                { msg_error "Couldn't change service name" die 1; }
+
+            msg_info "Services name changed from "$old_name" to "$new_name""
+            ;;
+        p|password)
+            create_password
+            new_pass="$(escape_replace <<<"$service_pass")"
+
+            modify_info --pass "$line_number" "$new_pass" || \
+                { msg_error "Couldn't change the password"; die 1; }
+            unset new_pass service_pass
+
+            msg_info "Services password changed"
+            ;;
+        u|username)
+            old_user="$(print_service_user "$1")"
+            msg_info "Enter the new username:"
+            ask_string
+            new_user="$(escape_replace <<<"$ask_string_reply")"
+
+            modify_info --user "$line_number" "$new_user" || \
+                { msg_error "Couldn't change the username"; die 1; }
+            msg_info "Services name changed from "$old_user" to "$new_user""
+            ;;
+    esac
+}
+
+sort_tmpfile() {
+    # desc: sort tmpfile, remove comments
+    # args: 0
+    sort "$tmpfile" | column -t
+}
+
+test_editor() {
+    # desc: test if the $EDITOR variable is set
+    #       if not, ask to specify the editor
+    # args: 0
+    [[ -n "$EDITOR" ]] || {\
+        msg_warning "\$EDITOR not set."
+        msg_info "Specify the editor to use:"
+        while :
+        do
+            ask_string
+            chosen_editor="$ask_string_reply"
+            chosen_editor_real="$(type -P "$chosen_editor")" || \
+                { msg_warning "Editor "$chosen_editor" not found."; continue; }
+            EDITOR="$chosen_editor_real"
+            break
+        done
+        }
+}
+
+test_pwfile_exists() {
+    # desc: make sure the pwfile exists, and that it's a gpg-file
+    #       if not, exit
+    # args: 0
+    [[ -f "$pwfile" ]] || \
+        { msg_error "Password-file "$pwfile" not found"; die 1; }
+    [[ "$(file -b "$pwfile")" == "PGP message" ]] || \
+        { msg_error "Password-file "$pwfile" is not a pgp-file"; die 1; }
+}
+
+test_pwfile_integrity() {
+    # desc: check the pwfile for incorrect lines
+    # args: 0
+    edit_needed="no"
+    pwfile_errors="no"
+
+    while read -r line
+    do
+        [[ ! "$line" =~ ^[[:graph:]]+[[:space:]]+[[:graph:]]+[[:space:]]+[[:graph:]]+$ ]] && \
+            { msg_warning "Line \""$line"\" isn't a valid line"; pwfile_errors="yes"; }
+    done < <(print_pwfile_cleaned)
+    [[ "$pwfile_errors" == "no" ]] || edit_needed="yes"
+}
+
+test_service_does_exist() {
+    # desc: make sure service $1 does exist
+    #       if it does not, exit
+    # args: 1
+    grep -q -w "$1" < <(print_service_list) || \
+        { msg_error "Service "$1" doesn't exist"; die 1; }
+}
+
+test_service_does_not_exist() {
+    # desc: make sure service $1 does not exist
+    #       if it does, exit
+    # args: 1
+    grep -q -w "$1" < <(print_service_list) && \
+        { msg_error "Service "$1" already exists"; die 1; }
+}
+
+yank_password() {
+    # desc: copy the password of service $1 to the primary selection
+    # args: 1
+    xsel --input --primary < <(print_service_pass "$1") || \
+        { msg_error "Couldn't copy the password to the clipboard"; die 1; }
+    msg_info "Password copied to the primary selection"
+}
+
+yank_username() {
+    # desc: copy the username of service $1 to the clipboard selection
+    # args: 1
+    xsel --input --clipboard < <(print_service_user "$1") || \
+        { msg_error "Couldn't copy the username to the clipboard"; die 1; }
+    msg_info "Username copied to the clipboard selection"
+}
+
+########################
+######### MAIN #########
+########################
+
+while getopts ":a:d:ehlm:p:y:v" opt
+do
+    case "$opt" in
+        a)
+            test_pwfile_exists
+            decrypt_pwfile
+            test_service_does_not_exist "$OPTARG"
+            create_pwfile_bak
+            service_add "$OPTARG"
+            encrypt_pwfile
+            die 0
+            ;;
+        d)
+            test_pwfile_exists
+            decrypt_pwfile
+            test_service_does_exist "$OPTARG"
+            create_pwfile_bak
+            service_del "$OPTARG"
+            encrypt_pwfile
+            die 0
+            ;;
+        e)
+            test_pwfile_exists
+            test_editor
+            decrypt_pwfile
+            create_pwfile_bak
+            edit_pwfile
+            encrypt_pwfile
+            die 0
+            ;;
+        h)
+            print_usage
+            die 0
+            ;;
+        l)
+            test_pwfile_exists
+            decrypt_pwfile
+            msg_info "List of services:"
+            print_service_list
+            die 0
+            ;;
+        m)
+            test_pwfile_exists
+            decrypt_pwfile
+            test_service_does_exist "$OPTARG"
+            create_pwfile_bak
+            service_modify "$OPTARG"
+            encrypt_pwfile
+            die 0
+            ;;
+        p)
+            test_pwfile_exists
+            decrypt_pwfile
+            test_service_does_exist "$OPTARG"
+            print_service_info "$OPTARG"
+            die 0
+            ;;
+        v)
+            print_version
+            die 0
+            ;;
+        y)
+            test_pwfile_exists
+            decrypt_pwfile
+            test_service_does_exist "$OPTARG"
+            yank_password "$OPTARG"
+            yank_username "$OPTARG"
+            die 0
+            ;;
+        :)
+            msg_error "Option -${OPTARG} requires an argument"
+            die 1
+            ;;
+        \?)
+            msg_error "Invalid option. Use -h to get usage instructions"
+            die 1
+            ;;
+    esac
+done
+
+print_usage

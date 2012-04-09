@@ -1,0 +1,96 @@
+.TH BWMAN 1 "03 April 2012"
+.SH NAME
+bwman \- Password manager using bash and gnupg
+.SH SYNOPSIS
+.B bwman
+.RB [ \-ehl ]
+.RB [ \-a
+.IR NAME ]
+.RB [ \-d
+.IR NAME ]
+.RB [ \-p
+.IR NAME ]
+.RB [ \-y
+.IR NAME ]
+.SH DESCRIPTION
+bwman (bashword manager) is a password manager for bash. It keeps passwords in a
+gpg-encrypted text file. For now only single operation is allowed per
+invocation.
+.P
+Before using bwman, you must create yourself a gpg key, which will be used when
+encrypting the password-file.
+.P
+.RS
+gpg2 \-\-gen\-key
+.RE
+.P
+Then create a file named bwman.asc, put it in
+.I ~/.local/share/bwman/
+and encrypt it with gpg. This will be your password-file.
+.P
+.RS
+mkdir ~/.local/share/bwman
+
+touch ~/.local/share/bwman/bwman.asc
+
+gpg2 --encrypt --armor --recipient
+.I GPG-USERNAME
+~/.local/share/bwman/bwman.asc
+.RE
+.P
+Now you can start adding your passwords to the password-file with the
+.B -a
+switch, or you can edit the password-file directly with the
+.B -e
+switch.
+.SH OPTIONS
+.TP
+.BI "\-a " NAME
+Add service \fINAME\fP to the password-file.
+.TP
+.BI "\-d " NAME
+Delete service \fINAME\fP from the password-file.
+.TP
+.B \-e
+Edit the password-file with an editor specified by $EDITOR. In case $EDITOR is
+not set, user is prompted to specify the editor to use.
+.TP
+.B \-h
+Print usage instructions
+.TP
+.B \-l
+Print a list of all services
+.TP
+.BI "\-p " NAME
+Print the username and password of \fINAME\fP.
+.TP
+.BI "\-y " NAME
+Yank the password of \fINAME\fP to the primary selection and the username of
+\fINAME\fP to the clipboard selection.
+.SH FILES
+.TP
+.B /etc/bwman.conf
+Global configuration file
+.TP
+.B ~/.config/bwman/bwman.conf
+User configuration file
+.TP
+.B ~/.local/share/bwman/bwman.asc
+Password-file
+.SH NOTES
+.TP
+.B Password-file format
+.RS
+[SERVICE][SPACES][USERNAME][SPACES][PASSWORD]
+.RE
+.SH BUGS
+.EX
+No spaces are allowed in usernames, passwords or service names because of the
+way the passwords are currently stored. See \fBNOTES\fP.
+.EE
+.SH AUTHOR
+.EX
+schalox <schalox at gmail dot com>
+.EE
+.SH SEE ALSO
+.BR pwsafe (1)
