@@ -2,8 +2,8 @@
 
 # IDEAS
 # - when adding/deleting, unlock the pwfile last
-# - sort tmpfile
 # - s/getopts/while-case/?
+# - merge msg_error and die?
 
 ########################
 ####### VARIABLES ######
@@ -19,8 +19,8 @@ p_version="1.0a"
 
 c_error="$(tput setaf 1)"
 c_normal="$(tput setaf 2)"
-c_reset="$(tput sgr0)"
 c_warning="$(tput setaf 3)"
+c_reset="$(tput sgr0)"
 
 global_config="/etc/bwman.conf"
 user_config="${XDG_CONFIG_HOME:-"${HOME}/config"}/bwman/bwman.conf"
@@ -58,8 +58,15 @@ die() {
     exit "$1"
 }
 
-trap "msg_error 'Error occurred'; die 1" TERM
-trap "msg_error 'Interrupt caught'; die 2" INT
+die_error() {
+    # desc: exit the script with error message $@ and exit status 1
+    # args: >1
+    msg_error "$@"
+    die 1
+}
+
+trap 'die_error "Error occurred"' TERM
+trap 'die_error "Interrupt caught"' INT
 
 ask_boolean() {
     # desc: ask a yes/no question, store the answer in $ask_boolean_reply
@@ -182,16 +189,22 @@ create_password() {
 create_pwfile_bak() {
     # desc: create a backup of the pwfile, if backup-creating is enabled
     # args: 0
-    [[ "$create_pwfile_backups" == "yes" ]] && \
-        cp -f "$pwfile" "${pwfile}.bak" || {\
-        msg_error "Couldn't backup the password-file"; die 1; }
+    [[ "$create_pwfile_backups" == "yes" ]] && {\
+        cp -f "$pwfile" "${pwfile}.bak" || \
+        die_error "Couldn't backup the password-file"; }
 }
 
 create_tmpfile() {
     # desc: create a temp-file to be used to store the pwfile
     # args: 0
-    tmpfile="$(mktemp -q -p /tmp ${p_name}.$$.XXXXXXXXXXXXXXXX)" || \
-        { msg_error "Couldn't create a temp-file"; die 1; }
+    if [[ -n "$1" ]]
+    then
+        tmpfile_name="tmpfile_${1}"
+    else
+        tmpfile_name="tmpfile"
+    fi
+    declare -g "$tmpfile_name"="$(mktemp -q -p /tmp ${p_name}.$$.XXXXXXXXXXXXXXXX)" || \
+        die_error "Couldn't create a temp-file"
 }
 
 decrypt_pwfile() {
@@ -222,7 +235,7 @@ edit_pwfile() {
     while :
     do
         ${EDITOR} "$tmpfile" || \
-            { msg_error "Couldn't edit the password-file"; die 1; }
+            die_error "Couldn't edit the password-file";
         test_pwfile_integrity
         case "$edit_needed" in
             yes)
@@ -246,7 +259,7 @@ encrypt_pwfile() {
     # args: 0
     gpg2 --encrypt --yes --armor --recipient "$gpg_user" \
         --logger-file /dev/null --output "$pwfile" "$tmpfile" || \
-        { msg_error "Couldn't encrypt the password-file"; die 1; }
+        die_error "Couldn't encrypt the password-file"
 }
 
 escape_replace() {
@@ -282,12 +295,6 @@ modify_info() {
     sed -i -e ""$2"s/[[:graph:]]\+/"$3"/"$field"" "$tmpfile"
 }
 
-print_pwfile_cleaned() {
-    # desc: print the tmpfile without empty or commented lines
-    # args: 0
-    grep -E -v '^[[:space:]]*#|^[[:space:]]*$' "$tmpfile"
-}
-
 print_service_info() {
     # desc: print info about service $1
     # args: 1
@@ -305,21 +312,21 @@ print_service_line() {
 print_service_list() {
     # args: print a list of services
     # args: 0
-    awk '{print $1 | "sort"}' < <(print_pwfile_cleaned)
+    awk '{print $1 | "sort"}' "$tmpfile"
 }
 
 print_service_pass() {
     # desc: print the password of service $1
     # args: 1
     awk -v line="$(print_service_line "$1")" \
-        'NR==line {print $3}' "$tmpfile"
+        'NR==line {print $3; exit}' "$tmpfile"
 }
 
 print_service_user() {
     # desc: print the username of service $1
     # args: 1
     awk -v line="$(print_service_line "$1")" \
-        'NR==line {print $2}' "$tmpfile"
+        'NR==line {print $2; exit}' "$tmpfile"
 }
 
 print_usage() {
@@ -355,7 +362,7 @@ service_add() {
     create_password
 
     echo "${service_name} ${service_user} ${service_pass}" >> "$tmpfile" || \
-        { msg_error "Couldn't add the service"; die 1; }
+        die_error "Couldn't add the service"
     unset service_pass
     msg_info "Service "$service_name" added"
 }
@@ -369,7 +376,7 @@ service_del() {
         y)
             line_number="$(print_service_line "$1")"
             sed -i -e "${line_number}d" "$tmpfile" || \
-                { msg_error "Couldn't delete service"; die 1; }
+                die_error "Couldn't delete service"
             msg_info "Deleted "$1""
             ;;
         n)
@@ -393,7 +400,7 @@ service_modify() {
             new_name="$(escape_replace <<<"$ask_string_reply")"
 
             modify_info --name "$line_number" "$new_name" || \
-                { msg_error "Couldn't change service name" die 1; }
+                die_error "Couldn't change service name"
 
             msg_info "Services name changed from "$old_name" to "$new_name""
             ;;
@@ -402,7 +409,7 @@ service_modify() {
             new_pass="$(escape_replace <<<"$service_pass")"
 
             modify_info --pass "$line_number" "$new_pass" || \
-                { msg_error "Couldn't change the password"; die 1; }
+                die_error "Couldn't change the password"
             unset new_pass service_pass
 
             msg_info "Services password changed"
@@ -414,16 +421,19 @@ service_modify() {
             new_user="$(escape_replace <<<"$ask_string_reply")"
 
             modify_info --user "$line_number" "$new_user" || \
-                { msg_error "Couldn't change the username"; die 1; }
+                die_error "Couldn't change the username"
             msg_info "Services name changed from "$old_user" to "$new_user""
             ;;
     esac
 }
 
 sort_tmpfile() {
-    # desc: sort tmpfile, remove comments
+    # desc: sort tmpfile alphabetically, then "columnize" it
     # args: 0
-    sort "$tmpfile" | column -t
+    create_tmpfile "sort"
+    sort "$tmpfile" | column -t > "$tmpfile_sort"
+    mv "$tmpfile_sort" "$tmpfile"
+    unset tmpfile_sort
 }
 
 test_editor() {
@@ -450,9 +460,9 @@ test_pwfile_exists() {
     #       if not, exit
     # args: 0
     [[ -f "$pwfile" ]] || \
-        { msg_error "Password-file "$pwfile" not found"; die 1; }
+        die_error "Password-file "$pwfile" not found"
     [[ "$(file -b "$pwfile")" == "PGP message" ]] || \
-        { msg_error "Password-file "$pwfile" is not a pgp-file"; die 1; }
+        die_error "Password-file "$pwfile" is not a pgp-file"
 }
 
 test_pwfile_integrity() {
@@ -463,9 +473,9 @@ test_pwfile_integrity() {
 
     while read -r line
     do
-        [[ ! "$line" =~ ^[[:graph:]]+[[:space:]]+[[:graph:]]+[[:space:]]+[[:graph:]]+$ ]] && \
+        [[ "$line" =~ ^[[:graph:]]+[[:space:]]+[[:graph:]]+[[:space:]]+[[:graph:]]+$ ]] || \
             { msg_warning "Line \""$line"\" isn't a valid line"; pwfile_errors="yes"; }
-    done < <(print_pwfile_cleaned)
+    done <"$tmpfile"
     [[ "$pwfile_errors" == "no" ]] || edit_needed="yes"
 }
 
@@ -474,7 +484,7 @@ test_service_does_exist() {
     #       if it does not, exit
     # args: 1
     grep -q -w "$1" < <(print_service_list) || \
-        { msg_error "Service "$1" doesn't exist"; die 1; }
+        die_error "Service "$1" doesn't exist"
 }
 
 test_service_does_not_exist() {
@@ -482,14 +492,14 @@ test_service_does_not_exist() {
     #       if it does, exit
     # args: 1
     grep -q -w "$1" < <(print_service_list) && \
-        { msg_error "Service "$1" already exists"; die 1; }
+        die_error "Service "$1" already exists"
 }
 
 yank_password() {
     # desc: copy the password of service $1 to the primary selection
     # args: 1
     xsel --input --primary < <(print_service_pass "$1") || \
-        { msg_error "Couldn't copy the password to the clipboard"; die 1; }
+        die_error "Couldn't copy the password to the clipboard"
     msg_info "Password copied to the primary selection"
 }
 
@@ -497,7 +507,7 @@ yank_username() {
     # desc: copy the username of service $1 to the clipboard selection
     # args: 1
     xsel --input --clipboard < <(print_service_user "$1") || \
-        { msg_error "Couldn't copy the username to the clipboard"; die 1; }
+        die_error "Couldn't copy the username to the clipboard"
     msg_info "Username copied to the clipboard selection"
 }
 
@@ -514,6 +524,7 @@ do
             test_service_does_not_exist "$OPTARG"
             create_pwfile_bak
             service_add "$OPTARG"
+            sort_tmpfile
             encrypt_pwfile
             die 0
             ;;
@@ -523,6 +534,7 @@ do
             test_service_does_exist "$OPTARG"
             create_pwfile_bak
             service_del "$OPTARG"
+            sort_tmpfile
             encrypt_pwfile
             die 0
             ;;
@@ -532,6 +544,7 @@ do
             decrypt_pwfile
             create_pwfile_bak
             edit_pwfile
+            sort_tmpfile
             encrypt_pwfile
             die 0
             ;;
@@ -552,6 +565,7 @@ do
             test_service_does_exist "$OPTARG"
             create_pwfile_bak
             service_modify "$OPTARG"
+            sort_tmpfile
             encrypt_pwfile
             die 0
             ;;
@@ -575,12 +589,10 @@ do
             die 0
             ;;
         :)
-            msg_error "Option -${OPTARG} requires an argument"
-            die 1
+            die_error "Option -${OPTARG} requires an argument"
             ;;
         \?)
-            msg_error "Invalid option. Use -h to get usage instructions"
-            die 1
+            die_error "Invalid option. Use -h to get usage instructions"
             ;;
     esac
 done
