@@ -197,8 +197,8 @@ create_pwfile_bak() {
 
 create_tmpfile() {
     # desc: create a temp-file to be used to store the pwfile
-    #       with no arguments, links to variable $tmpfile
-    #       with $1, links to variable $tmpfile_$1
+    #       with no arguments, creates $tmpfile
+    #       with $1, creates $tmpfile_$1
     # args: 0-1
     if [[ -n "$1" ]]
     then
@@ -276,8 +276,18 @@ escape_replace() {
     # desc: escape special characters in replace part of sed expression
     #       http://stackoverflow.com/a/2705678
     # args: >1
-    #sed -e 's/\([\/&]\)/\\\1/g'
     sed -e 's/[\/&]/\\&/g'
+}
+
+export_pwfile() {
+    # desc: export the password-file to $export_file
+    # args: 1
+    export_file="/tmp/${1}"
+    [[ -f "$export_file" ]] && \
+        die_error "Export-file $export_file already exists"
+    mv "$tmpfile" "$export_file" || \
+        die_error "Couldn't export password-file to $export_file"
+    msg_info "Password-file exported to $export_file"
 }
 
 generate_pass() {
@@ -345,6 +355,7 @@ print_usage() {
     echo "    -l        List services"
     echo "    -m NAME   Modify services name, username or password"
     echo "    -p NAME   Print services username and password"
+    echo "    -x NAME   Export the password-file to /tmp/NAME"
     echo "    -y NAME   Yank services password to the clipboard"
     echo "    -h        Help"
 }
@@ -520,7 +531,7 @@ yank_user() {
 ######### MAIN #########
 ########################
 
-while getopts ":a:d:ehlm:p:y:v" opt
+while getopts ":a:d:ehlm:p:x:y:v" opt
 do
     case "$opt" in
         a)
@@ -560,7 +571,7 @@ do
         l)
             test_pwfile_exists
             decrypt_pwfile
-            msg_info "List of services:"
+            msg_info "Services:"
             print_service_list
             die 0
             ;;
@@ -583,6 +594,12 @@ do
             ;;
         v)
             print_version
+            die 0
+            ;;
+        x)
+            test_pwfile_exists
+            decrypt_pwfile
+            export_pwfile "$OPTARG"
             die 0
             ;;
         y)
