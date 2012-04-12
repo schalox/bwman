@@ -161,7 +161,7 @@ ask_string() {
     done
 }
 
-create_password() {
+create_pass() {
     # desc: create a random password, ask if it gets copied to clipboard
     # args: 0
     msg_info "Create a [c]ustom or [r]andom password?"
@@ -169,14 +169,15 @@ create_password() {
     case "$ask_select_reply" in
         c|custom)
             ask_pass
-            service_pass="$ask_pass_reply"
+            create_pass_reply="$ask_pass_reply"
             ;;
         r|random)
-            service_pass="$(generate_password)"
+            generate_pass
+            create_pass_reply="$generate_pass_reply"
             msg_info "Copy password to the clipboard?"
             ask_boolean
             [[ "$ask_boolean_reply" == "y" ]] && \
-                if xsel -i <<< "$service_pass"
+                if xsel -i <<< "$create_pass_reply"
                 then
                     msg_info "Password copied to the clipboard"
                 else
@@ -196,7 +197,9 @@ create_pwfile_bak() {
 
 create_tmpfile() {
     # desc: create a temp-file to be used to store the pwfile
-    # args: 0
+    #       with no arguments, links to variable $tmpfile
+    #       with $1, links to variable $tmpfile_$1
+    # args: 0-1
     if [[ -n "$1" ]]
     then
         tmpfile_name="tmpfile_${1}"
@@ -232,9 +235,16 @@ edit_pwfile() {
     # desc: edit the pwfile with $EDITOR
     #       after editing check if pwfile is correctly written
     # args: 0
+    case "$EDITOR" in
+        vim)
+            editor_opts='-c "set nobackup" -c "set nowritebackup"'
+            editor_opts+='-c "set viminfo=" -c "set noswapfile"'
+            editor_opts+='-c "set bufhidden=wipe"'
+            ;;
+    esac
     while :
     do
-        ${EDITOR} "$tmpfile" || \
+        ${EDITOR} "$editor_opts" "$tmpfile" || \
             die_error "Couldn't edit the password-file";
         test_pwfile_integrity
         case "$edit_needed" in
@@ -270,17 +280,11 @@ escape_replace() {
     sed -e 's/[\/&]/\\&/g'
 }
 
-escape_substitute() {
-    # desc: escape special characters in substitute part of sed expression
-    #       http://stackoverflow.com/a/2705678
-    # args: >1
-    sed -e 's/\([[\/.*]\|\]\)/\\&/g'
-}
-
-generate_password() {
+generate_pass() {
     # desc: generate a random password with length of password_length
     # args: 0
-    tr -dc [:graph:] < /dev/urandom | head -c "$password_length"
+    generate_pass_reply="$(tr -dc [:graph:] < /dev/urandom \
+        | head -c "$password_length")"
 }
 
 modify_info() {
@@ -339,6 +343,7 @@ print_usage() {
     echo "    -d NAME   Delete a service"
     echo "    -e        Edit the password-file with \$EDITOR"
     echo "    -l        List services"
+    echo "    -m NAME   Modify services name, username or password"
     echo "    -p NAME   Print services username and password"
     echo "    -y NAME   Yank services password to the clipboard"
     echo "    -h        Help"
@@ -359,11 +364,11 @@ service_add() {
     ask_string
     service_user="$ask_string_reply"
 
-    create_password
+    create_pass
 
-    echo "${service_name} ${service_user} ${service_pass}" >> "$tmpfile" || \
+    echo "${service_name} ${service_user} ${create_pass_reply}" >> "$tmpfile" || \
         die_error "Couldn't add the service"
-    unset service_pass
+    unset create_pass_reply
     msg_info "Service "$service_name" added"
 }
 
@@ -405,12 +410,12 @@ service_modify() {
             msg_info "Services name changed from "$old_name" to "$new_name""
             ;;
         p|password)
-            create_password
-            new_pass="$(escape_replace <<<"$service_pass")"
+            create_pass
+            new_pass="$(escape_replace <<<"$create_pass_reply")"
 
             modify_info --pass "$line_number" "$new_pass" || \
                 die_error "Couldn't change the password"
-            unset new_pass service_pass
+            unset new_pass create_pass_reply
 
             msg_info "Services password changed"
             ;;
@@ -495,7 +500,7 @@ test_service_does_not_exist() {
         die_error "Service "$1" already exists"
 }
 
-yank_password() {
+yank_pass() {
     # desc: copy the password of service $1 to the primary selection
     # args: 1
     xsel --input --primary < <(print_service_pass "$1") || \
@@ -503,7 +508,7 @@ yank_password() {
     msg_info "Password copied to the primary selection"
 }
 
-yank_username() {
+yank_user() {
     # desc: copy the username of service $1 to the clipboard selection
     # args: 1
     xsel --input --clipboard < <(print_service_user "$1") || \
@@ -584,8 +589,8 @@ do
             test_pwfile_exists
             decrypt_pwfile
             test_service_does_exist "$OPTARG"
-            yank_password "$OPTARG"
-            yank_username "$OPTARG"
+            yank_pass "$OPTARG"
+            yank_user "$OPTARG"
             die 0
             ;;
         :)

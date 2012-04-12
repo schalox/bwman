@@ -1,27 +1,20 @@
-.TH BWMAN 1 "03 April 2012"
+.TH BWMAN 1 "11 April 2012"
 .SH NAME
 bwman \- Password manager using bash and gnupg
 .SH SYNOPSIS
 .B bwman
 .RB [ \-ehl ]
-.RB [ \-a
-.IR NAME ]
-.RB [ \-d
-.IR NAME ]
-.RB [ \-p
-.IR NAME ]
-.RB [ \-y
+.RB [ \-a | \-d | \-m | \-p | \-y
 .IR NAME ]
 .SH DESCRIPTION
 bwman (bashword manager) is a password manager for bash. It keeps passwords in a
-gpg-encrypted text file. For now only single operation is allowed per
-invocation.
+gpg-encrypted text file. Single action is allowed per invocation.
 .P
 Before using bwman, you must create yourself a gpg key, which will be used when
 encrypting the password-file.
 .P
 .RS
-gpg2 \-\-gen\-key
+.B gpg2 \-\-gen\-key
 .RE
 .P
 Then create a file named bwman.asc, put it in
@@ -29,18 +22,17 @@ Then create a file named bwman.asc, put it in
 and encrypt it with gpg. This will be your password-file.
 .P
 .RS
-mkdir ~/.local/share/bwman
+.B mkdir \fI~/.local/share/bwman\fP
 
-touch ~/.local/share/bwman/bwman.asc
+.B touch \fI~/.local/share/bwman/bwman.asc\fP
 
-gpg2 --encrypt --armor --recipient
-.I GPG-USERNAME
-~/.local/share/bwman/bwman.asc
+.B gpg2 --encrypt --armor --recipient
+.I GPG-USERNAME ~/.local/share/bwman/bwman.asc
 .RE
 .P
 Now you can start adding your passwords to the password-file with the
 .B -a
-switch, or you can edit the password-file directly with the
+switch. You can also edit the password-file directly with the
 .B -e
 switch.
 .SH OPTIONS
@@ -56,17 +48,21 @@ Edit the password-file with an editor specified by $EDITOR. In case $EDITOR is
 not set, user is prompted to specify the editor to use.
 .TP
 .B \-h
-Print usage instructions
+Print usage instructions.
 .TP
 .B \-l
-Print a list of all services
+Print a list of all services.
+.TP
+.BI "\-m " NAME
+Modify the name, username or password of \fINAME\fP.
 .TP
 .BI "\-p " NAME
 Print the username and password of \fINAME\fP.
 .TP
 .BI "\-y " NAME
 Yank the password of \fINAME\fP to the primary selection and the username of
-\fINAME\fP to the clipboard selection.
+\fINAME\fP to the clipboard selection. Paste the username with \fBC-V\fP
+and the password with either middle-clicking the mouse or pressing \fBS-Insert\fP.
 .SH FILES
 .TP
 .B /etc/bwman.conf
@@ -81,7 +77,7 @@ Password-file
 .TP
 .B Password-file format
 .RS
-[SERVICE][SPACES][USERNAME][SPACES][PASSWORD]
+[SERVICE][SPACE(S)][USERNAME][SPACE(S)][PASSWORD]
 .RE
 .SH BUGS
 .EX
