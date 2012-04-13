@@ -2,6 +2,7 @@
 
 # IDEAS
 # - when adding/deleting, unlock the pwfile last
+# - allow opts per editor (editor_opts_vim), also in config-file
 
 ########################
 ####### VARIABLES ######
