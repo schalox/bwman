@@ -2,8 +2,6 @@
 
 # IDEAS
 # - when adding/deleting, unlock the pwfile last
-# - s/getopts/while-case/?
-# - merge msg_error and die?
 
 ########################
 ####### VARIABLES ######
@@ -63,6 +61,12 @@ die_error() {
     # args: >1
     msg_error "$@"
     die 1
+}
+
+die_normal() {
+    # desc: exit the script normally
+    # args: 0
+    die 0
 }
 
 trap 'die_error "Error occurred"' TERM
@@ -542,7 +546,7 @@ do
             service_add "$OPTARG"
             sort_tmpfile
             encrypt_pwfile
-            die 0
+            die_normal
             ;;
         d)
             test_pwfile_exists
@@ -552,7 +556,7 @@ do
             service_del "$OPTARG"
             sort_tmpfile
             encrypt_pwfile
-            die 0
+            die_normal
             ;;
         e)
             test_pwfile_exists
@@ -562,18 +566,18 @@ do
             edit_pwfile
             sort_tmpfile
             encrypt_pwfile
-            die 0
+            die_normal
             ;;
         h)
             print_usage
-            die 0
+            die_normal
             ;;
         l)
             test_pwfile_exists
             decrypt_pwfile
             msg_info "Services:"
             print_service_list
-            die 0
+            die_normal
             ;;
         m)
             test_pwfile_exists
@@ -583,24 +587,24 @@ do
             service_modify "$OPTARG"
             sort_tmpfile
             encrypt_pwfile
-            die 0
+            die_normal
             ;;
         p)
             test_pwfile_exists
             decrypt_pwfile
             test_service_does_exist "$OPTARG"
             print_service_info "$OPTARG"
-            die 0
+            die_normal
             ;;
         v)
             print_version
-            die 0
+            die_normal
             ;;
         x)
             test_pwfile_exists
             decrypt_pwfile
             export_pwfile "$OPTARG"
-            die 0
+            die_normal
             ;;
         y)
             test_pwfile_exists
@@ -608,7 +612,7 @@ do
             test_service_does_exist "$OPTARG"
             yank_pass "$OPTARG"
             yank_user "$OPTARG"
-            die 0
+            die_normal
             ;;
         :)
             die_error "Option -${OPTARG} requires an argument"

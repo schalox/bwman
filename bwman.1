@@ -4,7 +4,7 @@ bwman \- Password manager using bash and gnupg
 .SH SYNOPSIS
 .B bwman
 .RB [ \-ehl ]
-.RB [ \-a | \-d | \-m | \-p | \-y
+.RB [ \-a | \-d | \-m | \-p | \-x | \-y
 .IR NAME ]
 .SH DESCRIPTION
 bwman (bashword manager) is a password manager for bash. It keeps passwords in a
@@ -58,6 +58,9 @@ Modify the name, username or password of \fINAME\fP.
 .TP
 .BI "\-p " NAME
 Print the username and password of \fINAME\fP.
+.TP
+.BI "\-x " NAME
+Export the password-file to /tmp/\fINAME\fP.
 .TP
 .BI "\-y " NAME
 Yank the password of \fINAME\fP to the primary selection and the username of
