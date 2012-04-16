@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # bwman
-# Copyright (C) 2011 schalox
+# Copyright (C) 2012 schalox
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -19,17 +19,18 @@
 # USA.
 
 # IDEAS
-# - when adding/deleting, unlock the pwfile last
-# - allow opts per editor (editor_opts_vim), also in config-file
+# - disable editing?
 
 ########################
 ####### VARIABLES ######
 ########################
 
-create_pwfile_backups="yes"
+backup_age="7"
+create_backups="yes"
 gpg_user="$USER"
 password_length="16"
-pwfile="${XDG_DATA_HOME:-"${HOME}/local/share"}/bwman/bwman.asc"
+pwfile_dir="${XDG_DATA_HOME:-"${HOME}/local/share"}"
+pwfile="${pwfile_dir}/bwman/bwman.asc"
 
 p_name="$(basename $0)"
 p_version="1.0a"
@@ -211,11 +212,20 @@ create_pass() {
 }
 
 create_pwfile_bak() {
-    # desc: create a backup of the pwfile, if backup-creating is enabled
+    # desc: create a backup of the pwfile, if backup-creating is enabled and
+    #       delete old backups
     # args: 0
-    [[ "$create_pwfile_backups" == "yes" ]] && {\
-        cp -f "$pwfile" "${pwfile}.bak" || \
-        die_error "Couldn't backup the password-file"; }
+    if [[ "$create_backups" =~ ^[yY][eE][sS]$ ]]
+    then
+        time_format="$(date '+%F_%H-%M-%S')"
+        cp "$pwfile" "${pwfile}_${time_format}.bak" || \
+        die_error "Couldn't backup the password-file"
+
+        ((backup_age--))
+        find "$pwfile_dir" \
+            -iname '*.bak' -mtime "+${backup_age}" -exec rm -f {} \+ || \
+            msg_warning "Couldn't delete the old backup-files"
+    fi
 }
 
 create_tmpfile() {
