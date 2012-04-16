@@ -17,6 +17,6 @@ package() {
     install -D -m644 "${pkgname}.1" "${pkgdir}/usr/share/man/man1/${pkgname}.1"
     install -D -m644 "${pkgname}.conf" "${pkgdir}/etc/${pkgname}.conf"
 }
-sha256sums=('a3421e0db16e3bf12cdf9ea98b59d29f30a5725c4b44dcbf136fef14d286efc7'
+sha256sums=('ddf8aaf72730b9a2678afc1b198931cc0b5ed6d82456d7a49842232e94c7b350'
             'd93d2d0b872ff3a919336c67fb201107963299df6a84314b1ed47f587499f927'
-            '56a398e26ca6d34786db31cd9e169ffb1dea72b5586de3b4490613090accb000')
+            '5350bddee0c7d3ee0fd54c0adfd025deec73178df24670d0f2599a4da5228474')
