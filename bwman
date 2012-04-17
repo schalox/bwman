@@ -26,6 +26,7 @@
 ########################
 
 backup_age="7"
+clear_clipboard="yes"
 create_backups="yes"
 gpg_user="$USER"
 password_length="16"
@@ -67,11 +68,17 @@ msg_warning() {
     echo "${c_warning}[warning]${c_reset} "$@"" >&2
 }
 
+del_tmpfile() {
+    # desc: delete the $tmpfile if existing
+    # args: 0
+    [[ -f "$tmpfile" ]] && { rm -f "$tmpfile" || \
+        msg_warning "Couldn't remove the temp-file"; }
+}
+
 die() {
     # desc: kill the script
     # args: 1
-    [[ -f "$tmpfile" ]] && { rm -f "$tmpfile" || \
-        msg_error "Couldn't remove the temp-file"; }
+    del_tmpfile
     stty echo
     exit "$1"
 }
@@ -544,6 +551,18 @@ test_service_does_not_exist() {
         die_error "Service "$1" already exists"
 }
 
+wait_clear_clipboard() {
+    if [[ "$clear_clipboard" =~ ^[yY][eE][sS]$ ]]
+    then
+        msg_info "Press [ENTER] to clear the clipboard"
+        read -s
+        xsel --delete --primary || \
+            msg_warning "Couldn't clear the primary selection"
+        xsel --delete --clipboard || \
+            msg_warning "Couldn't clear the clipboard selection"
+    fi
+}
+
 yank_pass() {
     # desc: copy the password of service $1 to the primary selection
     # args: 1
@@ -641,6 +660,8 @@ do
             test_service_does_exist "$OPTARG"
             yank_pass "$OPTARG"
             yank_user "$OPTARG"
+            del_tmpfile
+            wait_clear_clipboard
             die_normal
             ;;
         :)
